@@ -72,20 +72,13 @@ def handle_main_menu_choose(message):
             handle_user_info_selection(message)  # Обрабатываем выбор личных данных
         elif message.text == "О Greenway":
             user_manager.set_state(message.chat.id, 'about_company')
-            handle_user_info_selection(message)  # Запускаем ряд информативных сообщений о компани
+            handle_about_greenway(message)  # Запускаем ряд информативных сообщений о компани
         elif message.text == "Отправить промо" and is_moderator(message.chat.id):
             bot.send_message(message.chat.id,
                              "Введите текст сообщения для отправки промо и прикрепите фото (по желанию):")
             user_manager.set_state(message.chat.id, 'promo_input')
     else:
         bot.send_message(message.chat.id, "Пожалуйста, выберите действие.")
-
-def return_to_main_menu(chat_id):
-    # Переводит пользователя в главное меню с уведомлением
-    logger.info(f"Возникли технические трудности у пользователя {message.chat.id}, он возвращен в главное меню")
-    bot.send_message(chat_id, "Возникли технические трудности, вы возвращены в главное меню.")
-    main_menu(chat_id)  # Переход в главное меню
-    user_manager.set_state(chat_id, 'main_menu_choose')  # Сброс состояния пользователя
 
 @bot.message_handler(func=lambda message: user_manager.get_state(message.chat.id) == 'promo_input', content_types=['text', 'photo'])
 def handle_promo_input(message: Message):
@@ -1082,6 +1075,13 @@ def check_connection(interval=30):
             logger.error(f"Ошибка при проверке соединения: {e}")
             # Попробуем повторно подключиться к базе данных
             time.sleep(interval)
+
+def return_to_main_menu(chat_id):
+    # Переводит пользователя в главное меню с уведомлением
+    logger.info(f"Возникли технические трудности у пользователя {message.chat.id}, он возвращен в главное меню")
+    bot.send_message(chat_id, "Возникли технические трудности, вы возвращены в главное меню.")
+    main_menu(chat_id)  # Переход в главное меню
+    user_manager.set_state(chat_id, 'main_menu_choose')  # Сброс состояния пользователя
 
 if __name__ == "__main__":
     # Запускаем поток для проверки состояния

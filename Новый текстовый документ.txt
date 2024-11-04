@@ -1,3 +1,5 @@
+Модуль main.py
+__________
 from typing import Dict, Any
 import telebot
 from init import TOKEN, cursor, db, ADMIN_CHAT_ID, MODERATOR_IDS
@@ -1088,3 +1090,211 @@ if __name__ == "__main__":
     threading.Thread(target=check_connection, daemon=True).start()
     # Запуск основного процесса обработки сообщений
     bot.polling(none_stop=True)
+
+__________
+Модуль init.py
+__________
+import os
+import mysql.connector
+import logging
+from dotenv import load_dotenv
+
+# Загрузка переменных окружения
+load_dotenv()
+TOKEN = os.getenv('TELEGRAM_TOKEN')
+ADMIN_CHAT_ID = int(os.getenv('ADMIN_CHAT_ID'))
+MODERATOR_IDS = list(map(int, os.getenv('MODERATOR_IDS').split(',')))
+
+# Подключение к базе данных MySQL
+db = mysql.connector.connect(
+    host=os.getenv('DB_HOST'),
+    user=os.getenv('DB_USER'),
+    password=os.getenv('DB_PASSWORD'),
+    database=os.getenv('DB_NAME')
+)
+cursor = db.cursor()
+
+# Настройка логирования
+logging.basicConfig(
+    filename='bot.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+__________
+Модуль user_manager.py
+__________
+from typing import Dict, Any
+import logging
+
+logging.basicConfig(level=logging.INFO)
+
+class UserManager:
+    def __init__(self, cursor, db):
+        self.cursor = cursor
+        self.db = db
+        self.states: Dict[int, str] = {}
+        self.info: Dict[int, Dict[str, Any]] = {}
+        self.edit_items: Dict[int, int] = {}
+
+    def get_user_info_from_db(self, chat_id: int) -> Dict[str, Any]:
+        """Получение информации о пользователе из базы данных"""
+        logging.info(f"Получение данных для пользователя {chat_id}")
+        try:
+            self.cursor.execute("SELECT fio, phone, address FROM users WHERE telegram_id = %s", (chat_id,))
+            result = self.cursor.fetchone()
+            logging.info(f"Данные пользователя {chat_id}: {result}")
+            if result:
+                fio, phone, address = result
+                return {'fio': fio, 'phone': phone, 'address': address}
+        except Exception as e:
+            logging.error(f"Ошибка при запросе данных пользователя: {e}")
+        return {}
+
+    def save_user_to_db(self, chat_id: int, fio: str = None, phone: str = None, address: str = None):
+        """Сохранение или обновление информации о пользователе в базе данных"""
+        try:
+            self.cursor.execute("SELECT user_id FROM users WHERE telegram_id = %s", (chat_id,))
+            user = self.cursor.fetchone()
+
+            if user:
+                self.cursor.execute(""" 
+                    UPDATE users
+                    SET fio = %s, phone = %s, address = %s
+                    WHERE telegram_id = %s
+                """, (fio, phone, address, chat_id))
+            else:
+                self.cursor.execute(""" 
+                    INSERT INTO users (telegram_id, fio, phone, address)
+                    VALUES (%s, %s, %s, %s)
+                """, (chat_id, fio, phone, address))
+
+            self.db.commit()
+        except Exception as e:
+            logging.error(f"Ошибка при сохранении данных пользователя: {e}")
+
+    def set_state(self, chat_id: int, state: str):
+        self.states[chat_id] = state
+
+    def get_state(self, chat_id: int) -> str:
+        return self.states.get(chat_id, '')
+
+    def save_info(self, chat_id: int, **kwargs):
+        """Сохранение произвольной информации о пользователе."""
+        if chat_id not in self.info:
+            self.info[chat_id] = {}
+        self.info[chat_id].update(kwargs)
+
+    def get_info(self, chat_id: int) -> Dict[str, Any]:
+        return self.info.get(chat_id, {})
+
+    def set_edit_item(self, chat_id: int, item_index: int):
+        """Сохраняет индекс товара, который пользователь редактирует"""
+        self.edit_items[chat_id] = item_index
+
+    def get_edit_item(self, chat_id: int) -> int:
+        """Получает индекс товара, который пользователь редактирует"""
+        return self.edit_items.get(chat_id, None)
+
+    def clear_edit_item(self, chat_id: int):
+        """Очищает информацию о редактируемом товаре"""
+        if chat_id in self.edit_items:
+            del self.edit_items[chat_id]
+
+    def get_all_users(self):
+        """Возвращает всех пользователей из базы данных."""
+        users = []
+        try:
+            self.cursor.execute("SELECT telegram_id FROM users")
+            results = self.cursor.fetchall()
+            logging.info("Получены данные всех пользователей.")
+            for row in results:
+                users.append(row[0])  # Предполагаем, что telegram_id — это первый элемент в строке
+        except Exception as e:
+            logging.error(f"Ошибка при получении всех пользователей: {e}")
+        return users
+
+    def get_all_user_ids(self):
+        """Возвращает список всех идентификаторов пользователей."""
+        return self.get_all_users()  # Теперь этот метод корректен
+
+__________
+Модуль cart_manager.py
+__________
+from typing import List, Dict, Any
+
+class CartManager:
+    def __init__(self):
+        self.cart: Dict[int, List[Dict[str, Any]]] = {}
+
+    def add_to_cart(self, chat_id: int, product_id: int, product_name: str, product_price: float, quantity: int):
+        if chat_id not in self.cart:
+            self.cart[chat_id] = []
+        # Проверяем, если товар уже в корзине, обновляем количество
+        for item in self.cart[chat_id]:
+            if item['product_id'] == product_id:
+                item['quantity'] += quantity
+                item['total_price'] = item['quantity'] * item['product_price']
+                return
+        # Если товара еще нет в корзине, добавляем его
+        self.cart[chat_id].append({
+            'product_id': product_id,
+            'product_name': product_name,
+            'product_price': product_price,
+            'quantity': quantity,
+            'total_price': product_price * quantity
+        })
+
+    def get_cart(self, chat_id: int) -> List[Dict[str, Any]]:
+        return self.cart.get(chat_id, [])
+
+    def clear_cart(self, chat_id: int):
+        if chat_id in self.cart:
+            del self.cart[chat_id]
+
+    def update_item_quantity(self, chat_id: int, item_index: int, new_quantity: int):
+        """Обновляет количество указанного товара в корзине пользователя."""
+        if chat_id in self.cart and 0 <= item_index < len(self.cart[chat_id]):
+            self.cart[chat_id][item_index]['quantity'] = new_quantity
+            # Пересчитываем общую цену за товар с учетом нового количества
+            self.cart[chat_id][item_index]['total_price'] = self.cart[chat_id][item_index]['product_price'] * new_quantity
+
+    def remove_item(self, chat_id: int, item_index: int):
+        """Удаляет указанный товар из корзины пользователя."""
+        if chat_id in self.cart and 0 <= item_index < len(self.cart[chat_id]):
+            del self.cart[chat_id][item_index]
+
+__________
+Модуль logger.py
+__________
+import logging
+
+def setup_logger():
+    """Настройка логирования для бота"""
+    logging.basicConfig(
+        filename='bot.log',
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    return logging.getLogger(__name__)
+
+__________
+Файл .env
+__________
+TELEGRAM_TOKEN=2063749107:AAHbpdwidzImHzyrmNWKd_LzXXRp3xcdgzA
+ADMIN_CHAT_ID=-1002330196321
+MODERATOR_IDS=392873856
+
+DB_HOST=localhost
+DB_USER=root
+DB_PASSWORD=Wasnotyet1
+DB_NAME=telegram_shop
+
+__________
+Файл requirements.txt
+__________
+python-telegram-bot
+mysql-connector-python
+python-dotenv
