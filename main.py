@@ -7,6 +7,9 @@ from logger import setup_logger
 from telebot.types import Message, ReplyKeyboardRemove, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButton
 import threading
 import time
+from flask import Flask, request
+
+app = Flask(__name__)
 
 # Настройка логирования
 logger = setup_logger()
@@ -1083,8 +1086,14 @@ def return_to_main_menu(chat_id):
     main_menu(chat_id)  # Переход в главное меню
     user_manager.set_state(chat_id, 'main_menu_choose')  # Сброс состояния пользователя
 
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    json_str = request.get_data(as_text=True)
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "!", 200
+
 if __name__ == "__main__":
-    # Запускаем поток для проверки состояния
-    threading.Thread(target=check_connection, daemon=True).start()
-    # Запуск основного процесса обработки сообщений
-    bot.polling(none_stop=True)
+    bot.remove_webhook()
+    bot.set_webhook(url=f"https://greenshop-tg-test.onrender.com")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
